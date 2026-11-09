@@ -40,4 +40,103 @@ class AutoTask
             throw new StorageException('O diretório de locks não é gravável: ' . $this->lockDir);
         }
     }
+
+        public function deveExecutar(string $idTarefa, array $tarefa): bool
+    {
+        $estado    = $this->carregarEstado();
+        $ultimaExecucao = $estado[$idTarefa]['last_run'] ?? null;
+        $ultimaExecucaoEm = $ultimaExecucao !== null
+            ? new DateTimeImmutable($ultimaExecucao)
+            : null;
+
+        $agora = new DateTimeImmutable();
+
+        $frequencia = $tarefa['frequency'] ?? [];
+        $tipo       = $frequencia['type'] ?? null;
+
+        if ($tipo === 'interval') {
+            $minutos = (int)($frequencia['minutes'] ?? 0);
+            if ($minutos <= 0) {
+                return false;
+            }
+            if ($ultimaExecucaoEm === null) {
+                return true;
+            }
+            return ($agora->getTimestamp() - $ultimaExecucaoEm->getTimestamp()) >= ($minutos * 60);
+        }
+
+        if ($tipo === 'daily') {
+            $horario = $frequencia['time'] ?? '00:00';
+            [$hora, $minuto] = array_map('intval', explode(':', $horario));
+            $horarioAlvo = $agora->setTime($hora, $minuto, 0);
+
+            if ($agora < $horarioAlvo) {
+                return false;
+            }
+            if ($ultimaExecucaoEm === null) {
+                return true;
+            }
+            return $ultimaExecucaoEm->format('Y-m-d') !== $agora->format('Y-m-d');
+        }
+
+        if ($tipo === 'times') {
+            $horarios = $frequencia['times'] ?? [];
+            if (empty($horarios)) {
+                return false;
+            }
+
+            // Descobre o horário mais recente do dia que já passou.
+            $horarioMaisRecente = null;
+            foreach ($horarios as $horario) {
+                [$hora, $minuto] = array_map('intval', explode(':', $horario));
+                $horarioAlvo = $agora->setTime($hora, $minuto, 0);
+                if ($agora >= $horarioAlvo
+                    && ($horarioMaisRecente === null || $horarioAlvo > $horarioMaisRecente)
+                ) {
+                    $horarioMaisRecente = $horarioAlvo;
+                }
+            }
+
+            if ($horarioMaisRecente === null) {
+                return false;
+            }
+            if ($ultimaExecucaoEm === null) {
+                return true;
+            }
+            return $ultimaExecucaoEm < $horarioMaisRecente;
+        }
+
+        return false;
+    }
+
+    private function carregarEstado(): array
+    {
+        if (!is_file($this->stateFile)) {
+            return [];
+        }
+
+        $conteudo = file_get_contents($this->stateFile);
+        if ($conteudo === false || $conteudo === '') {
+            return [];
+        }
+
+        $dados = json_decode($conteudo, true);
+        return is_array($dados) ? $dados : [];
+    }
+
+    public function marcarExecucao(string $idTarefa): void
+    {
+        $estado = $this->carregarEstado();
+        $estado[$idTarefa] = [
+            'last_run' => (new DateTimeImmutable())->format(DateTimeInterface::ATOM),
+        ];
+
+        file_put_contents(
+            $this->stateFile,
+            json_encode(
+                $estado,
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+            ) . PHP_EOL
+        );
+    }
 }

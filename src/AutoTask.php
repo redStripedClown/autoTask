@@ -3,6 +3,8 @@
 namespace AutoTask;
 
 use AutoTask\Exception\StorageException;
+use DateTimeImmutable;
+use DateTimeInterface;
 
 class AutoTask
 {
@@ -41,18 +43,17 @@ class AutoTask
         }
     }
 
-        public function deveExecutar(string $idTarefa, array $tarefa): bool
+    public function deveExecutar(string $idTarefa, array $tarefa): bool
     {
-        $estado    = $this->carregarEstado();
-        $ultimaExecucao = $estado[$idTarefa]['last_run'] ?? null;
+        $estado = $this->lerEstado();
+        $ultimaExecucao = $estado[$idTarefa] ?? null;
         $ultimaExecucaoEm = $ultimaExecucao !== null
             ? new DateTimeImmutable($ultimaExecucao)
             : null;
 
         $agora = new DateTimeImmutable();
-
         $frequencia = $tarefa['frequency'] ?? [];
-        $tipo       = $frequencia['type'] ?? null;
+        $tipo = $frequencia['type'] ?? null;
 
         if ($tipo === 'interval') {
             $minutos = (int)($frequencia['minutes'] ?? 0);
@@ -85,7 +86,6 @@ class AutoTask
                 return false;
             }
 
-            // Descobre o horário mais recente do dia que já passou.
             $horarioMaisRecente = null;
             foreach ($horarios as $horario) {
                 [$hora, $minuto] = array_map('intval', explode(':', $horario));
@@ -109,34 +109,44 @@ class AutoTask
         return false;
     }
 
-    private function carregarEstado(): array
+    private function lerEstado(): array
     {
         if (!is_file($this->stateFile)) {
+            file_put_contents($this->stateFile, '{}');
             return [];
         }
 
         $conteudo = file_get_contents($this->stateFile);
-        if ($conteudo === false || $conteudo === '') {
+        $dados = json_decode($conteudo, true);
+
+        if (!is_array($dados)) {
+            file_put_contents($this->stateFile, '{}');
             return [];
         }
 
-        $dados = json_decode($conteudo, true);
-        return is_array($dados) ? $dados : [];
+        return $dados;
     }
 
-    public function marcarExecucao(string $idTarefa): void
+    public function registrarExecucao(string $idTarefa): void
     {
-        $estado = $this->carregarEstado();
-        $estado[$idTarefa] = [
-            'last_run' => (new DateTimeImmutable())->format(DateTimeInterface::ATOM),
-        ];
+        $estado = $this->lerEstado();
+        $estado[$idTarefa] = (new DateTimeImmutable())->format(DateTimeInterface::ATOM);
 
         file_put_contents(
             $this->stateFile,
             json_encode(
-                $estado,
+                (object) $estado,
                 JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
             ) . PHP_EOL
         );
+    }
+
+    public function executar(string $idTarefa, callable $acao): void
+    {
+        try {
+            $acao();
+        } finally {
+            $this->registrarExecucao($idTarefa);
+        }
     }
 }

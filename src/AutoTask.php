@@ -167,4 +167,50 @@ class AutoTask
             $this->registrarExecucao($idTarefa);
         }
     }
+
+    /**
+     * Registra uma execução em storage/logs.jsonl (uma linha JSON por execução).
+     *
+     * @param string $status "sucesso", "falha" ou "ignorada"
+     * @throws InvalidArgumentException se o status for inválido
+     * @throws StorageException se não for possível gravar o log
+     */
+    public function registrarLog(
+        string $tarefa,
+        DateTimeInterface $inicio,
+        float $duracao,
+        string $status,
+        int $tentativas = 1,
+        ?string $erro = null
+    ): void {
+        if (!in_array($status, ['sucesso', 'falha', 'ignorada'], true)) {
+            throw new InvalidArgumentException('Status de log inválido: ' . $status);
+        }
+
+        $entrada = [
+            'task'     => $tarefa,
+            'start'    => $inicio->format(DateTimeInterface::ATOM),
+            'duration' => round($duracao, 4),
+            'status'   => $status,
+            'attempts' => $tentativas,
+            'error'    => $erro,
+        ];
+
+        // INVALID_UTF8_SUBSTITUTE evita que uma mensagem de erro com
+        // caracteres estranhos faça o json_encode falhar.
+        $linha = json_encode(
+            $entrada,
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
+        );
+
+        if ($linha === false) {
+            throw new StorageException('Não foi possível gerar o JSON do log: ' . json_last_error_msg());
+        }
+
+        // LOCK_EX trava o arquivo durante a escrita, assim execuções
+        // simultâneas não misturam as linhas do log.
+        if (file_put_contents($this->logFile, $linha . "\n", FILE_APPEND | LOCK_EX) === false) {
+            throw new StorageException('Não foi possível gravar o log: ' . $this->logFile);
+        }
+    }
 }

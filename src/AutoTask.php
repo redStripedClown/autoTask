@@ -5,6 +5,7 @@ namespace AutoTask;
 use AutoTask\Exception\StorageException;
 use DateTimeImmutable;
 use DateTimeInterface;
+use InvalidArgumentException;
 
 class AutoTask
 {
@@ -13,6 +14,7 @@ class AutoTask
     private string $logFile;
     private string $stateFile;
     private string $lockDir;
+    private array $tasks = [];
 
     public function __construct(array $config, string $storagePath)
     {
@@ -41,6 +43,22 @@ class AutoTask
         if (!is_writable($this->lockDir)) {
             throw new StorageException('O diretório de locks não é gravável: ' . $this->lockDir);
         }
+    }
+
+    /**
+     * Associa o nome de uma tarefa (chave em config/tasks.php) a uma função PHP.
+     *
+     * @throws InvalidArgumentException se a tarefa não estiver na configuração
+     */
+    public function register(string $name, callable $fn): void
+    {
+        if (!isset($this->config['tasks'][$name])) {
+            throw new InvalidArgumentException(
+                'Tarefa não configurada em config/tasks.php: ' . $name
+            );
+        }
+
+        $this->tasks[$name] = $fn;
     }
 
     public function deveExecutar(string $idTarefa, array $tarefa): bool

@@ -6,6 +6,7 @@ use AutoTask\Exception\StorageException;
 use DateTimeImmutable;
 use DateTimeInterface;
 use InvalidArgumentException;
+use Throwable;
 
 class AutoTask
 {
@@ -165,6 +166,60 @@ class AutoTask
             $acao();
         } finally {
             $this->registrarExecucao($idTarefa);
+        }
+    }
+
+    /**
+     * Executa UMA tarefa pelo nome, forçando a execução (não consulta deveExecutar()).
+     *
+     * Passos: valida -> executa com retentativas -> registra o log -> atualiza o state.json.
+     * Se a tarefa falhar mesmo depois de todas as retentativas, o log e o estado são
+     * gravados e a última exceção é lançada de novo para quem chamou tratar.
+     *
+     * @throws InvalidArgumentException se a tarefa não estiver na config ou não estiver registrada
+     * @throws Throwable a última exceção da tarefa, se todas as tentativas falharem
+     */
+    public function runTask(string $name): void
+    {
+        if (!isset($this->config['tasks'][$name])) {
+            throw new InvalidArgumentException('Tarefa não configurada em config/tasks.php: ' . $name);
+        }
+
+        if (!isset($this->tasks[$name])) {
+            throw new InvalidArgumentException('Tarefa não registrada (use register()): ' . $name);
+        }
+
+        // TODO (#9): adquirir o lock da tarefa aqui e liberar no final (mesmo com erro).
+
+        $retryer = Retryer::daConfig($this->config['tasks'][$name]);
+        $inicio  = new DateTimeImmutable();
+        $t0      = microtime(true);
+        $erro    = null;
+
+        try {
+            $retryer->executar($this->tasks[$name]);
+        } catch (Throwable $e) {
+            $erro = $e;
+        }
+
+        $duracao = microtime(true) - $t0;
+
+        try {
+            $this->registrarLog(
+                $name,
+                $inicio,
+                $duracao,
+                $erro === null ? 'sucesso' : 'falha',
+                $retryer->getTentativas(),
+                $erro?->getMessage()
+            );
+        } finally {
+            // O estado é atualizado tanto no sucesso quanto na falha (issue #11)
+            $this->registrarExecucao($name);
+        }
+
+        if ($erro !== null) {
+            throw $erro;
         }
     }
 

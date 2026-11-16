@@ -302,6 +302,55 @@ class AutoTask
     }
 
     /**
+     * Percorre todas as tarefas da config e executa SÓ as que já venceram (deveExecutar()).
+     *
+     * Cada tarefa roda isolada: se uma falhar, as seguintes continuam normalmente.
+     * O log de cada execução é gravado pelo runTask(); aqui só mostramos no terminal
+     * o que aconteceu.
+     *
+     * @return array nome da tarefa => "sucesso", "falha", "ignorada" ou "nao_registrada"
+     *               (só aparecem as tarefas que estavam vencidas)
+     */
+    public function runPending(): array
+    {
+        $resultado = [];
+
+        foreach (($this->config['tasks'] ?? []) as $nome => $tarefa) {
+            $nome = (string)$nome;
+
+            try {
+                if (!$this->deveExecutar($nome, (array)$tarefa)) {
+                    continue;
+                }
+
+                if (!isset($this->tasks[$nome])) {
+                    echo "[ignorada] $nome: venceu, mas não está registrada (use register())" . PHP_EOL;
+                    $resultado[$nome] = 'nao_registrada';
+                    continue;
+                }
+
+                $status = $this->executarTarefa($nome);
+
+                if ($status === 'ignorada') {
+                    echo "[ignorada] $nome: execução anterior ainda ativa" . PHP_EOL;
+                } else {
+                    echo "[sucesso] $nome" . PHP_EOL;
+                }
+                $resultado[$nome] = $status;
+            } catch (Throwable $e) {
+                echo "[falha] $nome: " . $e->getMessage() . PHP_EOL;
+                $resultado[$nome] = 'falha';
+            }
+        }
+
+        if (empty($resultado)) {
+            echo "Nenhuma tarefa pendente." . PHP_EOL;
+        }
+
+        return $resultado;
+    }
+
+    /**
      * Registra uma execução em storage/logs.jsonl (uma linha JSON por execução).
      *
      * @param string $status "sucesso", "falha" ou "ignorada"

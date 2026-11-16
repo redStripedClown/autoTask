@@ -176,10 +176,27 @@ class AutoTask
      * Se a tarefa falhar mesmo depois de todas as retentativas, o log e o estado são
      * gravados e a última exceção é lançada de novo para quem chamou tratar.
      *
+     * Se a mesma tarefa já estiver rodando em outro processo (lock ocupado), esta
+     * execução é ignorada: grava no log "Ignorada: execução anterior ainda ativa"
+     * e retorna sem executar nada.
+     *
      * @throws InvalidArgumentException se a tarefa não estiver na config ou não estiver registrada
+     * @throws StorageException se não for possível criar o arquivo de lock
      * @throws Throwable a última exceção da tarefa, se todas as tentativas falharem
      */
     public function runTask(string $name): void
+    {
+        $this->executarTarefa($name);
+    }
+
+    /**
+     * Faz o trabalho do runTask() e informa o que aconteceu.
+     * (O runTask() é "void" como pede a issue #6; o runPending() precisa saber
+     * se a tarefa rodou ou foi ignorada, por isso existe este método.)
+     *
+     * @return string "sucesso" ou "ignorada"
+     */
+    private function executarTarefa(string $name): string
     {
         if (!isset($this->config['tasks'][$name])) {
             throw new InvalidArgumentException('Tarefa não configurada em config/tasks.php: ' . $name);
@@ -189,38 +206,99 @@ class AutoTask
             throw new InvalidArgumentException('Tarefa não registrada (use register()): ' . $name);
         }
 
-        // TODO (#9): adquirir o lock da tarefa aqui e liberar no final (mesmo com erro).
+        $lock = $this->adquirirLock($name);
 
-        $retryer = Retryer::daConfig($this->config['tasks'][$name]);
-        $inicio  = new DateTimeImmutable();
-        $t0      = microtime(true);
-        $erro    = null;
-
-        try {
-            $retryer->executar($this->tasks[$name]);
-        } catch (Throwable $e) {
-            $erro = $e;
-        }
-
-        $duracao = microtime(true) - $t0;
-
-        try {
+        if ($lock === null) {
             $this->registrarLog(
                 $name,
-                $inicio,
-                $duracao,
-                $erro === null ? 'sucesso' : 'falha',
-                $retryer->getTentativas(),
-                $erro?->getMessage()
+                new DateTimeImmutable(),
+                0.0,
+                'ignorada',
+                0,
+                'Ignorada: execução anterior ainda ativa'
             );
-        } finally {
-            // O estado é atualizado tanto no sucesso quanto na falha (issue #11)
-            $this->registrarExecucao($name);
+            return 'ignorada';
         }
 
-        if ($erro !== null) {
-            throw $erro;
+        try {
+            $retryer = Retryer::daConfig($this->config['tasks'][$name]);
+            $inicio  = new DateTimeImmutable();
+            $t0      = microtime(true);
+            $erro    = null;
+
+            try {
+                $retryer->executar($this->tasks[$name]);
+            } catch (Throwable $e) {
+                $erro = $e;
+            }
+
+            $duracao = microtime(true) - $t0;
+
+            try {
+                $this->registrarLog(
+                    $name,
+                    $inicio,
+                    $duracao,
+                    $erro === null ? 'sucesso' : 'falha',
+                    $retryer->getTentativas(),
+                    $erro?->getMessage()
+                );
+            } finally {
+                // O estado é atualizado tanto no sucesso quanto na falha (issue #11)
+                $this->registrarExecucao($name);
+            }
+
+            if ($erro !== null) {
+                throw $erro;
+            }
+
+            return 'sucesso';
+        } finally {
+            // O lock é liberado sempre, com sucesso, falha ou exceção
+            $this->liberarLock($lock);
         }
+    }
+
+    /**
+     * Tenta pegar o lock da tarefa: storage/locks/<nome>.lock
+     *
+     * Usa flock(LOCK_EX | LOCK_NB): "NB" significa que NÃO fica esperando; se outro
+     * processo já segura o lock, devolve null na hora. Cada tarefa tem o seu arquivo,
+     * então tarefas diferentes podem rodar ao mesmo tempo.
+     *
+     * @return resource|null o arquivo travado, ou null se a tarefa já está rodando
+     * @throws StorageException se o arquivo de lock não puder ser aberto
+     */
+    private function adquirirLock(string $name)
+    {
+        // Só letras, números, _ . e - no nome do arquivo (evita nomes perigosos)
+        $arquivo = preg_replace('/[^A-Za-z0-9_.-]/', '_', $name);
+        $caminho = $this->lockDir . '/' . $arquivo . '.lock';
+
+        // "c": cria o arquivo se não existir, sem apagar o conteúdo
+        $fp = @fopen($caminho, 'c');
+
+        if ($fp === false) {
+            throw new StorageException('Não foi possível abrir o arquivo de lock: ' . $caminho);
+        }
+
+        if (!flock($fp, LOCK_EX | LOCK_NB)) {
+            fclose($fp);
+            return null;
+        }
+
+        return $fp;
+    }
+
+    /**
+     * Libera o lock. (Se o processo morrer, o sistema operacional libera sozinho.)
+     *
+     * @param resource $fp
+     */
+    private function liberarLock($fp): void
+    {
+        flock($fp, LOCK_UN);
+        fclose($fp);
     }
 
     /**

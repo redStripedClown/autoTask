@@ -1,3 +1,4 @@
+
 <?php
 
 /**
@@ -18,7 +19,19 @@ return [
         // Tarefa de exemplo, usada para testar o framework.
         'hello_world' => [
             'frequency'   => ['type' => 'interval', 'minutes' => 1],
+            'max_retries' => 0,
+        ],
+        'limpar_temporarios' => [
+            'frequency'   => ['type' => 'daily', 'time' => '08:00'],
             'max_retries' => 2,
+        ],
+        'tarefa_com_erro' => [
+            'frequency'   => ['type' => 'interval', 'minutes' => 2],
+            'max_retries' => 3,
+        ],
+        'gerar_relatorio' => [
+            'frequency'   => ['type' => 'daily', 'time' => '08:00'],
+            'max_retries' => 1,
         ],
     ],
 ];

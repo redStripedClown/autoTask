@@ -162,14 +162,6 @@ class AutoTask
         );
     }
 
-    public function executar(string $idTarefa, callable $acao): void
-    {
-        try {
-            $acao();
-        } finally {
-            $this->registrarExecucao($idTarefa);
-        }
-    }
 
     /**
      * Executa UMA tarefa pelo nome, forçando a execução (não consulta deveExecutar()).
@@ -397,4 +389,5 @@ class AutoTask
             throw new StorageException('Não foi possível gravar o log: ' . $this->logFile);
         }
     }
+}
 }

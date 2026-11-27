@@ -23,7 +23,9 @@ if ($comando === null) {
 if ($comando === 'pending') {
     $auto = autotask_bootstrap(__DIR__);
     $auto->runPending();
-    exit(0);
+    exit(empty(array_filter($auto->runPending(), 
+                            fn($s) => $s === 'falha')) 
+                            ? 0 : 1);
 }
 
 if ($comando === 'task') {

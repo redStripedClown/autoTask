@@ -64,6 +64,7 @@ class AutoTask
 
     public function deveExecutar(string $idTarefa, array $tarefa): bool
     {
+        try{
         $estado = $this->lerEstado();
         $ultimaExecucao = $estado[$idTarefa] ?? null;
         $ultimaExecucaoEm = $ultimaExecucao !== null
@@ -126,6 +127,7 @@ class AutoTask
         }
 
         return false;
+        } catch (\Exception) { $ultimaExecucaoEm = null;
     }
 
     private function lerEstado(): array

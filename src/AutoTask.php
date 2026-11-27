@@ -272,7 +272,7 @@ class AutoTask
     private function adquirirLock(string $name)
     {
         // Só letras, números, _ . e - no nome do arquivo (evita nomes perigosos)
-        $arquivo = preg_replace('/[^A-Za-z0-9_.-]/', '_', $name);
+        $arquivo = preg_replace('/[^A-Za-z0-9_.-]/', '_', $name) . '-' . substr(sha1($name), 0, 8);;
         $caminho = $this->lockDir . '/' . $arquivo . '.lock';
 
         // "c": cria o arquivo se não existir, sem apagar o conteúdo
